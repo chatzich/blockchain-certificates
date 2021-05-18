@@ -13,10 +13,7 @@ import configargparse
 
 
 
-'''
-Issues bytes to the Bitcoin's blockchain using OP_RETURN.
-'''
-def issue_op_return(conf, op_return_bstring, interactive=False):
+def get_issue_tx_info(conf, op_return_bstring, interactive=False):
 
     # load apropriate blockchain libraries
     if(conf.blockchain == 'litecoin'):
@@ -88,6 +85,7 @@ def issue_op_return(conf, op_return_bstring, interactive=False):
 
     tx = None
     tx_inputs = []
+    tx_input_data = {}
     inputs_amount = 0
 
     # coin selection: use smallest UTXO and if not enough satoshis add next
@@ -96,6 +94,7 @@ def issue_op_return(conf, op_return_bstring, interactive=False):
     # change_output and allocate the remaining (<546sats) to fees
     for utxo in unspent:
         txin = TxInput(utxo['txid'], utxo['vout'])
+        tx_input_data[utxo['txid']] = utxo['amount']
         tx_inputs.append(txin)
         inputs_amount += utxo['amount']
 
@@ -149,7 +148,43 @@ def issue_op_return(conf, op_return_bstring, interactive=False):
 
     # update tx out for change and re-sign
     tx.outputs[0].amount = change_amount
-    r = proxy.signrawtransactionwithwallet(tx.serialize())
+
+    return tx.serialize(), conf.issuing_address, tx_input_data
+
+'''
+Takes a conf and a signed transaction raw data and send it to the network.
+'''
+def publish_tx_raw(conf,signed_tx_raw):
+        # load apropriate blockchain libraries
+    if(conf.blockchain == 'litecoin'):
+        from litecoinutils.setup import setup
+        from litecoinutils.proxy import NodeProxy
+    else:
+        from bitcoinutils.setup import setup
+        from bitcoinutils.proxy import NodeProxy
+
+
+    # initialize full node connection
+    if(conf.testnet):
+        setup('testnet')
+    else:
+        setup('mainnet')
+
+    host, port = conf.full_node_url.split(':')   # TODO: update when NodeProxy accepts full url!
+    proxy = NodeProxy(conf.full_node_rpc_user, conf.full_node_rpc_password,
+                      host, port).get_proxy()
+
+
+    return proxy.sendrawtransaction(signed_tx_raw)
+
+
+
+'''
+Issues bytes to the Bitcoin's blockchain using OP_RETURN.
+'''
+def issue_op_return(conf, op_return_bstring, interactive=False):
+    tx_raw, address, _ = get_issue_tx_info(conf, op_return_bstring, interactive)
+    r = proxy.signrawtransactionwithwallet(tx_raw)
     if r['complete'] == None:
         if interactive:
             sys.exit("Transaction couldn't be signed by node")
